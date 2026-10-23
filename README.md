@@ -1,21 +1,21 @@
+<!-- This file is the project homepage for the Rust port of go.starlark.net -->
 
-<!-- This file is the project homepage for go.starlark.net -->
+# Starlark in Rust
 
-# Starlark in Go
+[![Tests](https://github.com/google/starlark-go/actions/workflows/tests.yml/badge.svg)](https://github.com/google/starlark-go/actions/workflows/tests.yml)
 
-[![Go Tests](https://github.com/google/starlark-go/actions/workflows/tests.yml/badge.svg)](https://github.com/google/starlark-go/actions/workflows/tests.yml)
-[![Go Reference](https://pkg.go.dev/badge/go.starlark.net/starlark.svg)](https://pkg.go.dev/go.starlark.net/starlark)
-
-This is the home of the _Starlark in Go_ project.
-Starlark in Go is an interpreter for Starlark, implemented in Go.
+This is the home of the _Starlark in Rust_ project, a port of
+[Starlark in Go](https://github.com/google/starlark-go) to Rust.
+It provides an interpreter for Starlark as a library crate, `starlark`,
+and a command-line tool of the same name.
 Starlark was formerly known as Skylark.
-The import path for the Go package is `"go.starlark.net/starlark"`.
 
 Starlark is a dialect of Python intended for use as a configuration language.
 Like Python, it is an untyped dynamic language with high-level data
 types, first-class functions with lexical scope, and garbage collection.
-Unlike CPython, independent Starlark threads execute in parallel, so
-Starlark workloads scale well on parallel machines.
+Unlike CPython, Starlark has no global interpreter lock, so independent
+Starlark threads can execute in parallel and Starlark workloads scale
+well on parallel machines.
 Starlark is a small and simple language with a familiar and highly
 readable syntax. You can use it as an expressive notation for
 structured data, defining functions to eliminate repetition, or you
@@ -38,9 +38,9 @@ languages and compilers.
 
 * Language definition: [doc/spec.md](doc/spec.md)
 
-* About the Go implementation: [doc/impl.md](doc/impl.md)
+* About the Rust implementation: [doc/impl.md](doc/impl.md)
 
-* API documentation: [pkg.go.dev/go.starlark.net/starlark](https://pkg.go.dev/go.starlark.net/starlark)
+* API documentation: run `cargo doc --open`
 
 * Mailing list: [starlark-go](https://groups.google.com/forum/#!forum/starlark-go)
 
@@ -48,13 +48,16 @@ languages and compilers.
 
 ### Getting started
 
-Build the code:
+Build the interpreter (this requires a recent stable Rust toolchain):
 
 ```shell
-# check out the code and dependencies,
-# and install interpreter in $GOPATH/bin
-$ go install go.starlark.net/cmd/starlark@latest
+$ git clone https://github.com/google/starlark-go
+$ cd starlark-go
+$ cargo build --release
 ```
+
+The executable is `./target/release/starlark`.
+Use `cargo install --path .` to install it in `~/.cargo/bin`.
 
 Run the interpreter:
 
@@ -69,7 +72,7 @@ coins = {
 print('By name:\t' + ', '.join(sorted(coins.keys())))
 print('By value:\t' + ', '.join(sorted(coins.keys(), key=coins.get)))
 
-$ starlark coins.star
+$ ./target/release/starlark coins.star
 By name:	dime, nickel, penny, quarter
 By value:	penny, nickel, dime, quarter
 ```
@@ -77,7 +80,7 @@ By value:	penny, nickel, dime, quarter
 Interact with the read-eval-print loop (REPL):
 
 ```pycon
-$ starlark
+$ ./target/release/starlark
 >>> def fibonacci(n):
 ...    res = list(range(n))
 ...    for i in res[2:]:
@@ -91,26 +94,57 @@ $ starlark
 
 When you have finished, type `Ctrl-D` to close the REPL's input stream.
 
-Embed the interpreter in your Go program:
+The command accepts these flags:
 
-```go
-import "go.starlark.net/starlark"
+- `-c prog`: execute the program `prog` instead of a file.
+- `-showenv`: on success, print the final global environment.
+- `-recursion`: allow `while` statements and recursive functions.
+- `-globalreassign`: allow reassignment of globals, and `if`/`for`/`while`
+  statements at top level.
+- `-set`: allow the `set` built-in (enabled by default; use `-set=false`
+  to disable it).
 
-// Execute Starlark program in a file.
-thread := &starlark.Thread{Name: "my thread"}
-globals, err := starlark.ExecFile(thread, "fibonacci.star", nil, nil)
-if err != nil { ... }
+The `json`, `math` and `time` modules are predeclared in the command-line
+tool, and a `load` statement executes the named file (relative to the
+current directory) and caches its globals.
 
-// Retrieve a module global.
-fibonacci := globals["fibonacci"]
+Run the tests:
 
-// Call Starlark function from Go.
-v, err := starlark.Call(thread, fibonacci, starlark.Tuple{starlark.MakeInt(10)}, nil)
-if err != nil { ... }
-fmt.Printf("fibonacci(10) = %v\n", v) // fibonacci(10) = [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]
+```shell
+$ cargo test
 ```
 
-See [starlark/example_test.go](starlark/example_test.go) for more examples.
+Embed the interpreter in your Rust program by adding the crate as a
+dependency (for example, `starlark = { path = "../starlark-go" }` in
+`Cargo.toml`):
+
+```rust
+use starlark::starlark::{call, exec_file, Error, StringDict, Thread, Value};
+
+fn main() -> Result<(), Error> {
+    // Execute a Starlark program in a file.
+    let mut thread = Thread::new("my thread");
+    let globals = exec_file(&mut thread, "fibonacci.star", None, &StringDict::new())?;
+
+    // Retrieve a module global.
+    let fibonacci = globals.get("fibonacci").expect("fibonacci is not defined");
+
+    // Call the Starlark function from Rust.
+    let v = call(&mut thread, fibonacci, &[Value::int(10)], &[])?;
+    println!("fibonacci(10) = {}", v); // fibonacci(10) = [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]
+    Ok(())
+}
+```
+
+`exec_file` reads the file itself when its `src` argument is `None`, and
+uses the same dialect options as the command-line tool; use
+`exec_file_options` with a `syntax::FileOptions` to choose them per file.
+The last argument holds predeclared names, such as built-in functions
+created with `Builtin::value`. Set `thread.print` and `thread.load` to
+control the behavior of `print` and `load`. When evaluation fails, the
+error is an `Error::Eval`; its `EvalError::backtrace` method describes
+the active Starlark calls. See [src/bin/starlark.rs](src/bin/starlark.rs) and
+[tests/eval_test.rs](tests/eval_test.rs) for more examples.
 
 ### Bounding time, memory, and other resources
 
@@ -124,40 +158,27 @@ application to that source.
 
 The interpreter provides two mechanisms for bounding computation:
 
-- `Thread.SetMaxExecutionSteps` limits the number of abstract computation
-  steps a thread may take. The measure is deterministic and reproducible,
-  but it does not correspond to CPU time: not all steps are equal, and a
-  single step may be a call to a built-in function or operator that is
-  very slow or allocates a lot of memory (e.g. `string * int`).
-  Set `Thread.OnMaxSteps` to change what happens when the limit is reached.
+- `Thread::set_max_execution_steps` limits the number of abstract
+  computation steps a thread may take. The measure is deterministic and
+  reproducible, but it does not correspond to CPU time: not all steps are
+  equal, and a single step may be a call to a built-in function or
+  operator that is very slow or allocates a lot of memory (e.g.
+  `string * int`). When the limit is reached, evaluation fails with a
+  "too many steps" error.
 
-- `Thread.Cancel` asynchronously interrupts a running thread. The
-  interpreter polls an atomic variable rather than a channel or
-  `context.Context`, as this is much faster. To cancel a thread when a
-  context is done, use a goroutine:
-
-  ```go
-  ctx, cancel := context.WithCancel(ctx)
-  defer cancel()
-  go func() {
-      <-ctx.Done()
-      thread.Cancel("context cancelled")
-  }()
-  ... evaluate Starlark in thread ...
-  ```
-
-  Long-running built-in functions can honor cancellation too if you pass
-  the context to them using `thread.SetLocal`.
+- `Thread::cancel` makes the next step of evaluation fail with an error
+  that includes the given reason. Built-in functions receive the
+  `&mut Thread` and may call it, for example after checking a deadline or
+  a cancellation flag stored with `Thread::set_local`.
+  `Thread::uncancel` clears the cancellation state.
 
 There is no way to bound the memory used by a Starlark thread. The
 interpreter rejects single allocations that are unreasonably large, but a
 thread can allocate an unbounded amount of memory in smaller steps.
-Accounting for the live memory held by a thread is not even well defined,
-since frozen values may be shared among threads, and it would require the
-mark phase of a garbage collector capable of tracing both the Starlark
-heap and the Go heap. Similarly, the interpreter imposes a limit on stack
-depth to prevent recursion from overflowing the Go stack, but it does not
-promise what that limit is, other than "enough in most cases".
+Similarly, the interpreter limits the depth of Starlark calls when
+recursion is enabled, but deep recursion needs a large native stack:
+the command-line tool runs the interpreter on a thread with a large
+stack, and embedding applications should do the same.
 
 If you need to defend against denial of service, the only reliable
 approach is to let the operating system help you: evaluate Starlark in a
@@ -176,12 +197,12 @@ if you want to change or add to the Starlark repository.
 
 Before undertaking to write something new for the Starlark project,
 please file an issue or claim an existing issue.
-All significant changes to the language or to the interpreter's Go
+All significant changes to the language or to the interpreter's Rust
 API must be discussed before they can be accepted.
 This gives all participants a chance to validate the design and to
 avoid duplication of effort.
 
-Despite some differences, the Go implementation of Starlark strives to
+Despite some differences, this implementation of Starlark strives to
 match the behavior of [the Java implementation](https://github.com/bazelbuild/bazel)
 used by Bazel and maintained by the Bazel team.
 For that reason, proposals to change the language itself should
@@ -189,7 +210,7 @@ generally be directed to [the Starlark site](
 https://github.com/bazelbuild/starlark/), not to the maintainers of this
 project.
 Only once there is consensus that a language change is desirable may
-its Go implementation proceed.
+its implementation proceed.
 
 We use GitHub pull requests for contributions.
 
@@ -211,11 +232,9 @@ stage in the project, although we will endeavor to keep them to a minimum.
 Once the Bazel team has finalized the version 1 language specification,
 we will be more rigorous with interface stability.
 
-We aim to support the most recent two (go1.x) releases of the Go
-toolchain. For example, if the latest release is go1.26, we support it
-along with go1.25, but not go1.24. This mirrors the support window of
-the golang.org/x modules we depend upon. It is impractical to support
-older versions.
+The crate requires the Rust version given by `rust-version` in
+[Cargo.toml](Cargo.toml) or later, and is tested with the current
+stable toolchain.
 
 ### Credits
 
@@ -231,6 +250,7 @@ Florian Weikert,
 standing on the shoulders of the Python community.
 The Go implementation was written by Alan Donovan and Jay Conrod;
 its scanner was derived from one written by Russ Cox.
+This crate is a port of the Go implementation to Rust.
 
 ### Legal
 
@@ -239,5 +259,9 @@ All rights reserved.
 
 It is provided under a 3-clause BSD license:
 [LICENSE](https://github.com/google/starlark-go/blob/master/LICENSE).
+This Rust port is distributed under the same license. The modules under
+`src/lib/gomath`, `src/lib/gotime` and `src/lib/json` port parts of the Go
+standard library and keep its notices; they are governed by Go's BSD-style
+license (https://go.dev/LICENSE).
 
-Starlark in Go is not an official Google product.
+Starlark in Rust is not an official Google product.

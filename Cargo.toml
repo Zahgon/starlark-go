@@ -1,0 +1,23 @@
+[package]
+name = "starlark"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.96"
+description = "An interpreter for the Starlark configuration language (a Rust port of go.starlark.net)"
+license = "BSD-3-Clause"
+repository = "https://github.com/google/starlark-go"
+
+[dependencies]
+num-bigint = "0.4.8"
+num-integer = "0.1.47"
+num-traits = "0.2.19"
+
+[dev-dependencies]
+regex = "1.13.1"
+
+[[bin]]
+name = "starlark"
+path = "src/bin/starlark.rs"
+
+[profile.release]
+debug = false
